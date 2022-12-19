@@ -39,6 +39,7 @@ class InstallCommand extends Command
         'minio',
         'mailhog',
         'selenium',
+        'soketi',
     ];
 
     /**
@@ -57,7 +58,7 @@ class InstallCommand extends Command
         }
 
         if ($invalidServices = array_diff($services, $this->services)) {
-            $this->error('Invalid services ['.implode(',', $invalidServices).'].');
+            $this->error('Invalid services [' . implode(',', $invalidServices) . '].');
 
             return 1;
         }
@@ -106,7 +107,7 @@ class InstallCommand extends Command
 
         $volumes = collect($services)
             ->filter(function ($service) {
-                return in_array($service, ['mysql', 'pgsql', 'mariadb', 'redis', 'meilisearch', 'minio']);
+                return in_array($service, ['mysql', 'pgsql', 'mariadb', 'redis', 'meilisearch', 'minio', 'soketi']);
             })->map(function ($service) {
                 return "    sail-{$service}:\n        driver: local";
             })->whenNotEmpty(function ($collection) {
@@ -115,7 +116,7 @@ class InstallCommand extends Command
 
         $dockerCompose = file_get_contents(__DIR__ . '/../../stubs/docker-compose.stub');
 
-        $dockerCompose = str_replace('{{depends}}', empty($depends) ? '' : '        '.$depends, $dockerCompose);
+        $dockerCompose = str_replace('{{depends}}', empty($depends) ? '' : '        ' . $depends, $dockerCompose);
         $dockerCompose = str_replace('{{services}}', $stubs, $dockerCompose);
         $dockerCompose = str_replace('{{volumes}}', $volumes, $dockerCompose);
 
@@ -161,6 +162,27 @@ class InstallCommand extends Command
             $environment .= "\nMEILISEARCH_HOST=http://meilisearch:7700\n";
         }
 
+        if (in_array('soketi', $services)) {
+            $environment = preg_replace("/BROADCAST_DRIVER=(.*)/", "BROADCAST_DRIVER=pusher", $environment);
+
+            $environment = preg_replace("/^PUSHER_APP_ID=/m", "PUSHER_APP_ID=app-id", $environment);
+            $environment = preg_replace("/^PUSHER_APP_KEY=/m", "PUSHER_APP_KEY=app-key", $environment);
+            $environment = preg_replace("/^PUSHER_HOST=/m", "PUSHER_HOST=soketi", $environment);
+            $environment = preg_replace("/^PUSHER_APP_SECRET=/m", "PUSHER_APP_SECRET=app-secret", $environment);
+            $environment = preg_replace("/^PUSHER_PORT=(.*)/m", "PUSHER_PORT=6001", $environment);
+            $environment = preg_replace("/^PUSHER_SCHEME=(.*)/m", "PUSHER_SCHEME=http", $environment);
+
+
+            $config = file_get_contents($this->laravel->basePath('config/app.php'));
+            $config = str_replace('// App\Providers\BroadcastServiceProvider::class,', 'App\Providers\BroadcastServiceProvider::class,', $config);
+            file_put_contents($this->laravel->basePath('config/app.php'), $config);
+
+
+            $broadcast = file_get_contents($this->laravel->basePath('config/broadcasting.php'));
+            $broadcast = str_replace(" 'host' => env('PUSHER_HOST') ?: 'api-' . env('PUSHER_APP_CLUSTER', 'mt1') . '.pusher.com',", " 'host' => env('PUSHER_HOST'),", $broadcast);
+            file_put_contents($this->laravel->basePath('config/broadcasting.php'), $broadcast);
+        }
+
         file_put_contents($this->laravel->basePath('.env'), $environment);
     }
 
@@ -171,7 +193,7 @@ class InstallCommand extends Command
      */
     protected function configurePhpUnit()
     {
-        if (! file_exists($path = $this->laravel->basePath('phpunit.xml'))) {
+        if (!file_exists($path = $this->laravel->basePath('phpunit.xml'))) {
             $path = $this->laravel->basePath('phpunit.xml.dist');
         }
 
@@ -190,13 +212,13 @@ class InstallCommand extends Command
      */
     protected function installDevContainer()
     {
-        if (! is_dir($this->laravel->basePath('.devcontainer'))) {
+        if (!is_dir($this->laravel->basePath('.devcontainer'))) {
             mkdir($this->laravel->basePath('.devcontainer'), 0755, true);
         }
 
         file_put_contents(
             $this->laravel->basePath('.devcontainer/devcontainer.json'),
-            file_get_contents(__DIR__.'/../../stubs/devcontainer.stub')
+            file_get_contents(__DIR__ . '/../../stubs/devcontainer.stub')
         );
 
         $environment = file_get_contents($this->laravel->basePath('.env'));
@@ -222,7 +244,7 @@ class InstallCommand extends Command
 
         if (count($services) > 0) {
             $status = $this->runCommands([
-                './vendor/bin/sail pull '.implode(' ', $services),
+                './vendor/bin/sail pull ' . implode(' ', $services),
             ]);
 
             if ($status === 0) {
@@ -253,12 +275,12 @@ class InstallCommand extends Command
             try {
                 $process->setTty(true);
             } catch (RuntimeException $e) {
-                $this->output->writeln('  <bg=yellow;fg=black> WARN </> '.$e->getMessage().PHP_EOL);
+                $this->output->writeln('  <bg=yellow;fg=black> WARN </> ' . $e->getMessage() . PHP_EOL);
             }
         }
 
         return $process->run(function ($type, $line) {
-            $this->output->write('    '.$line);
+            $this->output->write('    ' . $line);
         });
     }
 }
